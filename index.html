@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>2D Physics Balancing Game</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #222;
+      color: white;
+      font-family: Arial, sans-serif;
+      user-select: none;
+    }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 18px;
+      z-index: 10;
+    }
+    #menu {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      background: #333;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+    #menu label {
+      display: block;
+      margin-bottom: 5px;
+      cursor: pointer;
+    }
+    #gameOverScreen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      color: #f33;
+      font-size: 48px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 20;
+      visibility: hidden;
+      user-select: none;
+      flex-direction: column;
+    }
+    #gameOverScreen button {
+      margin-top: 20px;
+      font-size: 24px;
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+    canvas {
+      display: block;
+      background: #111;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>Score: <span id="score">0</span></div>
+    <div>Life: <span id="life">100</span></div>
+  </div>
+  <div id="menu">
+    <div><strong>Select Vehicle:</strong></div>
+    <label><input type="radio" name="vehicle" value="stable" checked /> Stable Wide</label>
+    <label><input type="radio" name="vehicle" value="fast" /> Small Fast</label>
+    <label><input type="radio" name="vehicle" value="balanced" /> Medium Balanced</label>
+  </div>
+  <div id="gameOverScreen">
+    Game Over
+    <button id="restartBtn">Restart</button>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+  <script>
+    const { Engine, Render, Runner, World, Bodies, Body, Events, Composite, Vector } = Matter;
+
+    const canvas = document.getElementById('gameCanvas');
+    const scoreEl = document.getElementById('score');
+    const lifeEl = document.getElementById('life');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const restartBtn = document.getElementById('restartBtn');
+    const menu = document.getElementById('menu');
+
+    let engine;
+    let world;
+    let render;
+    let runner;
+
+    let vehicle;
+    let ground;
+    let boxes = [];
+    let spawnInterval;
+    let targetLine;
+    let tallestStackLine;
+
+    let score = 0;
+    let life = 100;
+    let gameOver = false;
+
+    // Vehicle properties by type
+    const vehicleTypes = {
+      stable: { width: 200, height: 20, speed: 50, density: 0.005, frictionAir: 0.1 },
+      fast: { width: 80, height: 20, speed: 80, density: 0.002, frictionAir: 0.02 },
+      balanced: { width: 140, height: 20, speed: 60, density: 0.004, frictionAir: 0.05 }
+    };
+
+    let currentVehicleType = 'stable';
+
+    function createVehicle(type) {
+      const props = vehicleTypes[type];
+      if (vehicle) {
+        World.remove(world, vehicle);
+      }
+      vehicle = Bodies.rectangle(
+        canvas.width / 2,
+        canvas.height - 60,
+        props.width,
+        props.height,
+        {
+          density: props.density,
+          frictionAir: props.frictionAir,
+          restitution: 0.1,
+          friction: 0.8,
+          chamfer: { radius: 2 },
+          label: 'vehicle',
+          collisionFilter: { group: Body.nextGroup(true) },
+          render: { fillStyle: '#0af' }
+        }
+      );
+      Body.setAngle(vehicle, 0);
+      Body.setAngularVelocity(vehicle, 0);
+      Body.setVelocity(vehicle, { x: 0, y: 0 });
+      World.add(world, vehicle);
+    }
+
+    function createGround() {
+      ground = Bodies.rectangle(
+        canvas.width / 2,
+        canvas.height - 10,
+        canvas.width,
+        20,
+        { isStatic: true, label: 'ground', render: { fillStyle: '#444' } }
+      );
+      World.add(world, ground);
+    }
+
+    function createTargetLine() {
+      targetLine = {
+        y: canvas.height / 4,
+        height: 4,
+        color: 'green',
+        scoreIncrement: 50
+      };
+    }
+
+    function createTallestStackLine() {
+      tallestStackLine = {
+        y: canvas.height - 60,
+        height: 4,
+        color: 'red'
+      };
+    }
+
+    function spawnBox() {
+      const size = 40;
+      const x = Math.random() * (canvas.width - size) + size / 2;
+      const box = Bodies.rectangle(x, -size, size, size, {
+        density: 0.002,
+        friction: 0.5,
+        restitution: 0.1,
+        label: 'box',
+        render: { fillStyle: '#faa' }
+      });
+      boxes.push(box);
+      World.add(world, box);
+    }
+
+    function updateUI() {
+      scoreEl.textContent = score;
+      lifeEl.textContent = life;
+    }
+
+    function checkGameOver() {
+      if (life <= 0 && !gameOver) {
+        gameOver = true;
+        gameOverScreen.style.visibility = 'visible';
+      }
+    }
+
+    function resetGame() {
+      // Remove all boxes
+      boxes.forEach(box => World.remove(world, box));
+      boxes = [];
+      // Reset score and life
+      score = 0;
+      life = 100;
+      gameOver = false;
+      gameOverScreen.style.visibility = 'hidden';
+      // Reset target line and tallest stack line
+      targetLine.y = canvas.height / 4;
+      tallestStackLine.y = canvas.height - 60;
+      // Reset vehicle position and velocity
+      Body.setPosition(vehicle, { x: canvas.width / 2, y: canvas.height - 60 });
+      Body.setAngle(vehicle, 0);
+      Body.setAngularVelocity(vehicle, 0);
+      Body.setVelocity(vehicle, { x: 0, y: 0 });
+      updateUI();
+    }
+
+    function updateTallestStackLine() {
+      let maxY = canvas.height - 60;
+      boxes.forEach(box => {
+        if (box.position.y < maxY) {
+          maxY = box.position.y;
+        }
+      });
+      tallestStackLine.y = maxY - 20; // slightly above highest box
+    }
+
+    function updateTargetLine() {
+      // Check if any box has reached or passed the target line
+      for (const box of boxes) {
+        if (box.position.y < targetLine.y) {
+          score += targetLine.scoreIncrement;
+          targetLine.y -= 30; // move line up slightly
+          break;
+        }
+      }
+    }
+
+    function handleBoxGroundCollision(event) {
+      const pairs = event.pairs;
+      pairs.forEach(pair => {
+        const labels = [pair.bodyA.label, pair.bodyB.label];
+        if (labels.includes('box') && labels.includes('ground')) {
+          // Deduct life only once per box hitting ground
+          const box = pair.bodyA.label === 'box' ? pair.bodyA : pair.bodyB;
+          if (!box.hitGround) {
+            life -= 10;
+            box.hitGround = true;
+            updateUI();
+            checkGameOver();
+          }
+        }
+      });
+    }
+
+    function handleBoxVehicleCollision(event) {
+      const pairs = event.pairs;
+      pairs.forEach(pair => {
+        const labels = [pair.bodyA.label, pair.bodyB.label];
+        if (labels.includes('box') && labels.includes('vehicle')) {
+          const box = pair.bodyA.label === 'box' ? pair.bodyA : pair.bodyB;
+          if (!box.caught) {
+            score += 5;
+            box.caught = true;
+            updateUI();
+          }
+        }
+      });
+    }
+
+    function setupControls() {
+      const keys = { left: false, right: false };
+      document.addEventListener('keydown', e => {
+        if (e.code === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
+        if (e.code === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+      });
+      document.addEventListener('keyup', e => {
+        if (e.code === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
+        if (e.code === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+      });
+      return keys;
+    }
+
+    function applyVehicleMovement(keys) {
+      if (gameOver) return;
+      const props = vehicleTypes[currentVehicleType];
+      if (keys.left) {
+        Body.applyForce(vehicle, vehicle.position, { x: -0.005 * props.speed, y: 0 });
+      }
+      if (keys.right) {
+        Body.applyForce(vehicle, vehicle.position, { x: 0.005 * props.speed, y: 0 });
+      }
+    }
+
+    function drawLine(ctx, y, color) {
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+
+    function drawFlag(ctx, y, color) {
+      const flagWidth = 20;
+      const flagHeight = 30;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(canvas.width - flagWidth - 10, y);
+      ctx.lineTo(canvas.width - 10, y + flagHeight / 2);
+      ctx.lineTo(canvas.width - flagWidth - 10, y + flagHeight);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function init() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      engine = Engine.create();
+      world = engine.world;
+      world.gravity.y = 1;
+
+      render = Render.create({
+        canvas: canvas,
+        engine: engine,
+        options: {
+          wireframes: false,
+          background: '#111',
+          width: canvas.width,
+          height: canvas.height,
+          showAngleIndicator: false,
+          showCollisions: false,
+          showVelocity: false
+        }
+      });
+
+      createGround();
+      createTargetLine();
+      createTallestStackLine();
+      createVehicle(currentVehicleType);
+
+      Render.run(render);
+      runner = Runner.create();
+      Runner.run(runner, engine);
+
+      // Spawn boxes every 1 second
+      spawnInterval = setInterval(() => {
+        if (!gameOver) spawnBox();
+      }, 2500);
+
+      updateUI();
+
+      // Collision events
+      Events.on(engine, 'collisionStart', event => {
+        handleBoxGroundCollision(event);
+        handleBoxVehicleCollision(event);
+      });
+
+      // Vehicle control keys
+      const keys = setupControls();
+
+      // Vehicle movement update loop
+      (function update() {
+        if (!gameOver) {
+          applyVehicleMovement(keys);
+          updateTallestStackLine();
+          updateTargetLine();
+        }
+        updateUI();
+        requestAnimationFrame(update);
+      })();
+
+      // Vehicle selection menu
+      menu.addEventListener('change', e => {
+        if (e.target.name === 'vehicle') {
+          currentVehicleType = e.target.value;
+          createVehicle(currentVehicleType);
+        }
+      });
+
+      // Restart button
+      restartBtn.addEventListener('click', () => {
+        resetGame();
+      });
+
+      // Resize canvas on window resize
+      window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        Render.lookAt(render, {
+          min: { x: 0, y: 0 },
+          max: { x: canvas.width, y: canvas.height }
+        });
+        Body.setPosition(ground, { x: canvas.width / 2, y: canvas.height - 10 });
+        Body.setVertices(ground, [
+          { x: 0, y: canvas.height - 20 },
+          { x: canvas.width, y: canvas.height - 20 },
+          { x: canvas.width, y: canvas.height },
+          { x: 0, y: canvas.height }
+        ]);
+        Body.setPosition(vehicle, { x: canvas.width / 2, y: canvas.height - 60 });
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
