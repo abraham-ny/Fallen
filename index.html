@@ -107,38 +107,83 @@
     // Vehicle properties by type
     const vehicleTypes = {
       stable: { width: 200, height: 20, speed: 50, density: 0.005, frictionAir: 0.1 },
-      fast: { width: 80, height: 20, speed: 80, density: 0.002, frictionAir: 0.02 },
-      balanced: { width: 140, height: 20, speed: 60, density: 0.004, frictionAir: 0.05 }
+      fast: { width: 80, height: 20, speed: 50, density: 0.002, frictionAir: 0.02 },
+      balanced: { width: 140, height: 20, speed: 50, density: 0.004, frictionAir: 0.05 }
     };
 
     let currentVehicleType = 'stable';
 
-    function createVehicle(type) {
-      const props = vehicleTypes[type];
-      if (vehicle) {
-        World.remove(world, vehicle);
-      }
-      vehicle = Bodies.rectangle(
-        canvas.width / 2,
-        canvas.height - 60,
-        props.width,
-        props.height,
-        {
-          density: props.density,
-          frictionAir: props.frictionAir,
-          restitution: 0.1,
-          friction: 0.8,
-          chamfer: { radius: 2 },
-          label: 'vehicle',
-          collisionFilter: { group: Body.nextGroup(true) },
-          render: { fillStyle: '#0af' }
-        }
-      );
-      Body.setAngle(vehicle, 0);
-      Body.setAngularVelocity(vehicle, 0);
-      Body.setVelocity(vehicle, { x: 0, y: 0 });
-      World.add(world, vehicle);
+function createVehicle(type) {
+  const props = vehicleTypes[type];
+  if (vehicle) {
+    World.remove(world, vehicle);
+  }
+  // Create compound body: base + left wall + right wall
+  const baseWidth = props.width + 40; // increase width for walls
+  const baseHeight = props.height;
+  const wallThickness = 20;
+  const wallHeight = props.height * 4;
+
+  const base = Bodies.rectangle(
+    canvas.width / 2,
+    canvas.height - 60,
+    baseWidth,
+    baseHeight,
+    {
+      density: props.density,
+      frictionAir: props.frictionAir,
+      restitution: 0.1,
+      friction: 0.8,
+      chamfer: { radius: 2 },
+      label: 'vehicle',
+      collisionFilter: { group: Body.nextGroup(true) },
+      render: { fillStyle: '#0af' }
     }
+  );
+
+  const leftWall = Bodies.rectangle(
+    canvas.width / 2 - baseWidth / 2 + wallThickness / 2,
+    canvas.height - 60 - wallHeight / 2 + baseHeight / 2,
+    wallThickness,
+    wallHeight,
+    {
+      density: props.density,
+      frictionAir: props.frictionAir,
+      restitution: 0.1,
+      friction: 0.8,
+      label: 'vehicle',
+      collisionFilter: { group: Body.nextGroup(true) },
+      render: { fillStyle: '#0af' }
+    }
+  );
+
+  const rightWall = Bodies.rectangle(
+    canvas.width / 2 + baseWidth / 2 - wallThickness / 2,
+    canvas.height - 60 - wallHeight / 2 + baseHeight / 2,
+    wallThickness,
+    wallHeight,
+    {
+      density: props.density,
+      frictionAir: props.frictionAir,
+      restitution: 0.1,
+      friction: 0.8,
+      label: 'vehicle',
+      collisionFilter: { group: Body.nextGroup(true) },
+      render: { fillStyle: '#0af' }
+    }
+  );
+
+  vehicle = Body.create({
+    parts: [base, leftWall, rightWall],
+    label: 'vehicle',
+    collisionFilter: { group: Body.nextGroup(true) }
+  });
+
+  Body.setAngle(vehicle, 0);
+  Body.setAngularVelocity(vehicle, 0);
+  Body.setVelocity(vehicle, { x: 0, y: 0 });
+  World.add(world, vehicle);
+}
 
     function createGround() {
       ground = Bodies.rectangle(
